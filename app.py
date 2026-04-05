@@ -21,29 +21,18 @@ st.set_page_config(
     layout="centered",
 )
 
-# ── Minimal custom CSS for mobile-friendliness ────────────────────────────────
 st.markdown("""
 <style>
     .stApp { max-width: 860px; margin: auto; }
-    .metric-box {
-        background: #1e1e2e;
-        border-radius: 12px;
-        padding: 16px 20px;
-        margin-bottom: 8px;
-    }
-    .profit  { color: #4caf50; font-weight: 700; }
-    .loss    { color: #f44336; font-weight: 700; }
-    .neutral { color: #aaa; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("📊 Trade Journal V2")
 st.caption("Upload your Fyers tradebook CSV → journal updates automatically.")
-
 st.divider()
 
-# ── Sidebar — Google Sheets status ────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Status")
     if st.button("🔌 Test Sheets Connection", use_container_width=True):
@@ -55,11 +44,10 @@ with st.sidebar:
                 st.caption("Tabs: " + ", ".join(tabs))
             except Exception as e:
                 st.error(f"Connection failed: {e}")
-
     st.divider()
     st.caption("**How to use:**")
     st.caption("1. Download tradebook from Fyers terminal")
-    st.caption("2. Upload CSV below (daily or weekly)")
+    st.caption("2. Upload CSV (daily or weekly)")
     st.caption("3. Review the preview")
     st.caption("4. Click **Sync to Sheets**")
     st.divider()
@@ -76,7 +64,6 @@ tab1, tab2 = st.tabs(["📂 CSV Upload & Sync", "✏️ Manual Entry"])
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
 
-    # ── File Upload ───────────────────────────────────────────────────────────
     uploaded_file = st.file_uploader(
         "📂 Drop your Fyers tradebook CSV here",
         type=["csv"],
@@ -85,132 +72,127 @@ with tab1:
 
     if uploaded_file is None:
         st.info("Upload a Fyers tradebook CSV to get started.")
-        st.stop()
 
-    # ── Parse ─────────────────────────────────────────────────────────────────
-    with st.spinner("Parsing CSV..."):
-        try:
-            trades = parse_fyers_csv(uploaded_file)
-        except Exception as e:
-            st.error(f"Failed to parse CSV: {e}")
-            st.stop()
-
-    if not trades:
-        st.warning("No trades found in the uploaded file. Make sure it is a valid Fyers tradebook CSV.")
-        st.stop()
-
-    # ── Summary metrics ───────────────────────────────────────────────────────
-    closed_trades = [t for t in trades if t.get("status") == "CLOSED"]
-    open_trades   = [t for t in trades if t.get("status") == "OPEN"]
-    total_pl      = sum(t.get("pl_rupees", 0) for t in closed_trades)
-    total_net_pl  = sum(t.get("net_pl", 0)    for t in closed_trades)
-    total_charges = sum(t.get("total_charges", 0) for t in closed_trades)
-    total_points  = sum(t.get("pl_points", 0) for t in closed_trades)
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Trades Found",    len(trades))
-    col2.metric("Closed",          len(closed_trades))
-    col3.metric("Open Positions",  len(open_trades))
-    col4.metric("Total Pts (closed)", f"{total_points:+.2f}")
-    col5.metric("Net P/L (closed)", f"₹{total_net_pl:,.2f}",
-                delta=f"charges ₹{total_charges:,.2f}", delta_color="inverse")
-
-    st.divider()
-
-    # ── Trades preview table ──────────────────────────────────────────────────
-    st.subheader("📋 Trade Preview")
-
-    preview_rows = []
-    for t in trades:
-        status_badge = "🟢 OPEN" if t.get("status") == "OPEN" else "✅ Closed"
-        net_pl_val   = t.get("net_pl", 0)
-
-        preview_rows.append({
-            "Status":       status_badge,
-            "Entry Date":   t.get("entry_date", ""),
-            "Instrument":   t.get("instrument", ""),
-            "Direction":    t.get("long_short", ""),
-            "Lots":         t.get("lots", 1),
-            "Entry ₹":      t.get("entry_price", 0),
-            "Exit ₹":       t.get("exit_price", "") if t.get("status") == "CLOSED" else "—",
-            "P/L (Pts)":    t.get("pl_points", 0),
-            "P/L ₹":        t.get("pl_rupees", 0),
-            "Charges ₹":    t.get("total_charges", 0),
-            "Net P/L ₹":    net_pl_val,
-            "Duration":     t.get("duration_display", ""),
-        })
-
-    df = pd.DataFrame(preview_rows)
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "P/L (Pts)": st.column_config.NumberColumn(format="%.2f"),
-            "P/L ₹":     st.column_config.NumberColumn(format="₹%.2f"),
-            "Net P/L ₹": st.column_config.NumberColumn(format="₹%.2f"),
-            "Charges ₹": st.column_config.NumberColumn(format="₹%.2f"),
-            "Entry ₹":   st.column_config.NumberColumn(format="%.2f"),
-            "Exit ₹":    st.column_config.TextColumn(),
-        }
-    )
-
-    # ── Charge breakdown expander ─────────────────────────────────────────────
-    with st.expander("🧾 Charge Breakdown (closed trades only)"):
-        if closed_trades:
-            charge_data = {
-                "Brokerage":    sum(t.get("brokerage", 0)    for t in closed_trades),
-                "STT":          sum(t.get("stt", 0)          for t in closed_trades),
-                "Exchange Txn": sum(t.get("exchange_txn", 0) for t in closed_trades),
-                "SEBI Fees":    sum(t.get("sebi_fees", 0)    for t in closed_trades),
-                "GST":          sum(t.get("gst", 0)          for t in closed_trades),
-                "Stamp Duty":   sum(t.get("stamp_duty", 0)   for t in closed_trades),
-                "Total":        total_charges,
-            }
-            charge_df = pd.DataFrame(
-                [{"Component": k, "Amount (₹)": round(v, 2)} for k, v in charge_data.items()]
-            )
-            st.dataframe(charge_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No closed trades to show charges for.")
-
-    st.divider()
-
-    # ── Sync button ───────────────────────────────────────────────────────────
-    st.subheader("🔄 Sync to Google Sheets")
-
-    if open_trades:
-        st.info(
-            f"ℹ️ **{len(open_trades)} open position(s)** found. "
-            "They will be written as `[OPEN]` rows. Upload next week's CSV (with the exit) "
-            "and they will be automatically closed and updated."
-        )
-
-    col_sync, col_gap = st.columns([1, 2])
-    with col_sync:
-        sync_clicked = st.button("🚀 Sync to Sheets", type="primary", use_container_width=True)
-
-    if sync_clicked:
-        with st.spinner("Syncing to Google Sheets..."):
+    else:
+        # ── Parse ─────────────────────────────────────────────────────────────
+        trades = None
+        with st.spinner("Parsing CSV..."):
             try:
-                ss     = get_sheets_client()
-                result = sync_to_sheets(trades, ss)
-
-                if result.get("errors"):
-                    for err in result["errors"]:
-                        st.error(err)
-                else:
-                    st.success(
-                        f"✅ Done!  "
-                        f"**{result['added']}** new rows added  •  "
-                        f"**{result['open_updated']}** open rows closed  •  "
-                        f"**{result['skipped']}** duplicates skipped"
-                    )
-                    st.balloons()
-
+                trades = parse_fyers_csv(uploaded_file)
             except Exception as e:
-                st.error(f"Sync failed: {e}")
-                st.caption("Check that GOOGLE_SHEET_ID and GOOGLE_CREDS_JSON are set correctly in your Streamlit secrets.")
+                st.error(f"Failed to parse CSV: {e}")
+
+        if trades is not None and len(trades) == 0:
+            st.warning("No trades found. Make sure it is a valid Fyers tradebook CSV.")
+            trades = None
+
+        if trades:
+            # ── Summary metrics ───────────────────────────────────────────────
+            closed_trades = [t for t in trades if t.get("status") == "CLOSED"]
+            open_trades   = [t for t in trades if t.get("status") == "OPEN"]
+            total_net_pl  = sum(t.get("net_pl", 0)        for t in closed_trades)
+            total_charges = sum(t.get("total_charges", 0) for t in closed_trades)
+            total_points  = sum(t.get("pl_points", 0)     for t in closed_trades)
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("Trades Found",       len(trades))
+            col2.metric("Closed",             len(closed_trades))
+            col3.metric("Open Positions",     len(open_trades))
+            col4.metric("Total Pts (closed)", f"{total_points:+.2f}")
+            col5.metric("Net P/L (closed)",   f"₹{total_net_pl:,.2f}",
+                        delta=f"charges ₹{total_charges:,.2f}", delta_color="inverse")
+
+            st.divider()
+
+            # ── Trades preview table ──────────────────────────────────────────
+            st.subheader("📋 Trade Preview")
+            preview_rows = []
+            for t in trades:
+                preview_rows.append({
+                    "Status":    "🟢 OPEN" if t.get("status") == "OPEN" else "✅ Closed",
+                    "Entry Date": t.get("entry_date", ""),
+                    "Instrument": t.get("instrument", ""),
+                    "Direction":  t.get("long_short", ""),
+                    "Lots":       t.get("lots", 1),
+                    "Entry ₹":    t.get("entry_price", 0),
+                    "Exit ₹":     t.get("exit_price", "") if t.get("status") == "CLOSED" else "—",
+                    "P/L (Pts)":  t.get("pl_points", 0),
+                    "P/L ₹":      t.get("pl_rupees", 0),
+                    "Charges ₹":  t.get("total_charges", 0),
+                    "Net P/L ₹":  t.get("net_pl", 0),
+                    "Duration":   t.get("duration_display", ""),
+                })
+
+            st.dataframe(
+                pd.DataFrame(preview_rows),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "P/L (Pts)": st.column_config.NumberColumn(format="%.2f"),
+                    "P/L ₹":     st.column_config.NumberColumn(format="₹%.2f"),
+                    "Net P/L ₹": st.column_config.NumberColumn(format="₹%.2f"),
+                    "Charges ₹": st.column_config.NumberColumn(format="₹%.2f"),
+                    "Entry ₹":   st.column_config.NumberColumn(format="%.2f"),
+                    "Exit ₹":    st.column_config.TextColumn(),
+                }
+            )
+
+            # ── Charge breakdown ──────────────────────────────────────────────
+            with st.expander("🧾 Charge Breakdown (closed trades only)"):
+                if closed_trades:
+                    charge_data = {
+                        "Brokerage":    sum(t.get("brokerage", 0)    for t in closed_trades),
+                        "STT":          sum(t.get("stt", 0)          for t in closed_trades),
+                        "Exchange Txn": sum(t.get("exchange_txn", 0) for t in closed_trades),
+                        "SEBI Fees":    sum(t.get("sebi_fees", 0)    for t in closed_trades),
+                        "GST":          sum(t.get("gst", 0)          for t in closed_trades),
+                        "Stamp Duty":   sum(t.get("stamp_duty", 0)   for t in closed_trades),
+                        "Total":        total_charges,
+                    }
+                    st.dataframe(
+                        pd.DataFrame([{"Component": k, "Amount (₹)": round(v, 2)}
+                                      for k, v in charge_data.items()]),
+                        use_container_width=True, hide_index=True,
+                    )
+                else:
+                    st.info("No closed trades to show charges for.")
+
+            st.divider()
+
+            # ── Sync button ───────────────────────────────────────────────────
+            st.subheader("🔄 Sync to Google Sheets")
+
+            if open_trades:
+                st.info(
+                    f"ℹ️ **{len(open_trades)} open position(s)** found. "
+                    "They will be written as `[OPEN]` rows. Upload next week's CSV "
+                    "(with the exit) and they will be automatically closed and updated."
+                )
+
+            col_sync, col_gap = st.columns([1, 2])
+            with col_sync:
+                sync_clicked = st.button("🚀 Sync to Sheets", type="primary",
+                                         use_container_width=True)
+
+            if sync_clicked:
+                with st.spinner("Syncing to Google Sheets..."):
+                    try:
+                        ss     = get_sheets_client()
+                        result = sync_to_sheets(trades, ss)
+                        if result.get("errors"):
+                            for err in result["errors"]:
+                                st.error(err)
+                        else:
+                            st.success(
+                                f"✅ Done!  "
+                                f"**{result['added']}** new rows added  •  "
+                                f"**{result['open_updated']}** open rows closed  •  "
+                                f"**{result['skipped']}** duplicates skipped"
+                            )
+                            st.balloons()
+                    except Exception as e:
+                        st.error(f"Sync failed: {e}")
+                        st.caption("Check GOOGLE_SHEET_ID and GOOGLE_CREDS_JSON in your Streamlit secrets.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -251,8 +233,8 @@ with tab2:
         with r1c2:
             instrument_text = st.text_input(
                 "Instrument",
-                placeholder="e.g. NIFTY 25000 CE  or  NIFTY 25000/25100 PE",
-                help="What to display in the sheet. Be consistent with your existing entries."
+                placeholder="e.g. NIFTY 25000 CE",
+                help="What to display in the sheet — keep it consistent with existing entries."
             )
             direction = st.selectbox("Direction / Type", _DIRECTIONS)
             lots      = st.number_input("Lots", min_value=1, value=1, step=1)
@@ -281,7 +263,6 @@ with tab2:
         )
 
     if submitted:
-        # ── Validate ──────────────────────────────────────────────────────────
         errors = []
         if not instrument_text.strip():
             errors.append("Instrument name is required.")
@@ -294,7 +275,6 @@ with tab2:
             for e in errors:
                 st.error(e)
         else:
-            # ── Calculate P&L & charges ───────────────────────────────────────
             is_long   = direction in _LONG_DIRECTIONS
             is_closed = status == "Closed"
             total_qty = lots * lot_size
@@ -313,10 +293,9 @@ with tab2:
             pl_points  = round(pl_rupees / total_qty, 2) if total_qty else 0.0
             num_orders = 2 if is_closed else 1
 
-            trade_date_str = entry_date.strftime("%Y-%m-%d")
             charges = calculate_charges(buy_value, sell_value, seg_code,
                                         num_orders=num_orders,
-                                        trade_date=trade_date_str)
+                                        trade_date=entry_date.strftime("%Y-%m-%d"))
             net_pl = round(pl_rupees - charges["total_charges"], 2)
 
             entry_date_str = entry_date.strftime("%d/%m/%Y")
@@ -329,47 +308,43 @@ with tab2:
                 duration_display = _fmt_duration(entry_dt_full, exit_dt_full)
 
             trade = {
-                "entry_date":        entry_date_str,
-                "segment":           segment,
-                "instrument":        instrument_text.strip(),
-                "long_short":        direction,
-                "status":            "CLOSED" if is_closed else "OPEN",
-                "lots":              lots,
-                "lot_size":          lot_size,
-                "entry_price":       entry_price,
-                "exit_date":         exit_date_str,
-                "exit_price":        exit_price if is_closed else 0.0,
-                "pl_points":         pl_points if is_closed else 0.0,
+                "entry_date":         entry_date_str,
+                "segment":            segment,
+                "instrument":         instrument_text.strip(),
+                "long_short":         direction,
+                "status":             "CLOSED" if is_closed else "OPEN",
+                "lots":               lots,
+                "lot_size":           lot_size,
+                "entry_price":        entry_price,
+                "exit_date":          exit_date_str,
+                "exit_price":         exit_price if is_closed else 0.0,
+                "pl_points":          pl_points  if is_closed else 0.0,
                 "actual_spot_points": "",
-                "pl_rupees":         pl_rupees if is_closed else 0.0,
-                "total_charges":     charges["total_charges"] if is_closed else 0.0,
-                "net_pl":            net_pl if is_closed else 0.0,
-                "duration_display":  duration_display,
-                "comments":          comments,
+                "pl_rupees":          pl_rupees  if is_closed else 0.0,
+                "total_charges":      charges["total_charges"] if is_closed else 0.0,
+                "net_pl":             net_pl     if is_closed else 0.0,
+                "duration_display":   duration_display,
+                "comments":           comments,
             }
 
-            # ── Preview before syncing ────────────────────────────────────────
             st.markdown("**Preview:**")
-            prev = {
+            st.dataframe(pd.DataFrame([{
                 "Instrument": trade["instrument"],
                 "Direction":  trade["long_short"],
                 "Status":     trade["status"],
                 "Entry Date": trade["entry_date"],
                 "Lots":       trade["lots"],
                 "Entry ₹":    trade["entry_price"],
-                "Exit ₹":     trade["exit_price"] if is_closed else "—",
-                "P/L ₹":      trade["pl_rupees"]  if is_closed else "—",
-                "Net P/L ₹":  trade["net_pl"]     if is_closed else "—",
+                "Exit ₹":     trade["exit_price"]     if is_closed else "—",
+                "P/L ₹":      trade["pl_rupees"]      if is_closed else "—",
+                "Net P/L ₹":  trade["net_pl"]         if is_closed else "—",
                 "Charges ₹":  trade["total_charges"],
-            }
-            st.dataframe(pd.DataFrame([prev]), use_container_width=True, hide_index=True)
+            }]), use_container_width=True, hide_index=True)
 
-            # ── Sync ──────────────────────────────────────────────────────────
             with st.spinner("Adding to Google Sheets..."):
                 try:
                     ss     = get_sheets_client()
                     result = add_manual_trade(trade, ss)
-
                     if result.get("errors"):
                         for err in result["errors"]:
                             st.error(err)
@@ -380,9 +355,11 @@ with tab2:
                             f"{direction}, {lots} lot(s) @ ₹{entry_price:.2f}"
                         )
                         if is_closed:
-                            st.caption(f"Net P/L: ₹{net_pl:+,.2f}  |  Charges: ₹{charges['total_charges']:.2f}")
+                            st.caption(
+                                f"Net P/L: ₹{net_pl:+,.2f}  |  "
+                                f"Charges: ₹{charges['total_charges']:.2f}"
+                            )
                         st.balloons()
-
                 except Exception as e:
                     st.error(f"Failed to add trade: {e}")
                     st.caption("Check your Streamlit secrets (GOOGLE_SHEET_ID, GOOGLE_CREDS_JSON).")
@@ -391,5 +368,5 @@ with tab2:
 st.divider()
 st.caption(
     "Trade Journal V2 • Fyers tradebook → Google Sheets • "
-    f"STT rates: Options 0.15%, Futures 0.05% (from Apr 1 2026)"
+    "STT rates: Options 0.15%, Futures 0.05% (from Apr 1 2026)"
 )
