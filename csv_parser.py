@@ -600,7 +600,10 @@ def _fmt_duration(start, end):
     total_mins = int(diff.total_seconds() / 60)
     if total_mins < 0:
         return ""
-    hours, mins = divmod(total_mins, 60)
+    days, remainder_mins = divmod(total_mins, 1440)  # 1440 mins in a day
+    hours, mins = divmod(remainder_mins, 60)
+    if days:
+        return f"{days}d {hours}h {mins}m"
     if hours:
         return f"{hours}h {mins}m"
     return f"{mins}m"
