@@ -230,6 +230,10 @@ def _update_open_rows(trade_log, trades):
             updated_row += [""] * (21 - len(updated_row))
 
         updated_row[4]  = match.get("long_short", updated_row[4].replace(" [OPEN]", ""))
+        # Correct any manual-entry mistakes with authoritative tradebook values
+        updated_row[5]  = match.get("lots",        updated_row[5]  if len(updated_row) > 5  else 1)
+        updated_row[6]  = match.get("lot_size",    updated_row[6]  if len(updated_row) > 6  else 1)
+        updated_row[7]  = match.get("entry_price", updated_row[7]  if len(updated_row) > 7  else 0)
         updated_row[8]  = match.get("exit_date", "")
         updated_row[9]  = match.get("exit_price", 0)
         updated_row[10] = match.get("pl_points", 0)
@@ -553,6 +557,86 @@ def _move_open_rows_to_end(trade_log):
     end_row  = 3 + len(padded)
 
     trade_log.update(f"A4:{end_col}{end_row}", padded, value_input_option="USER_ENTERED")
+
+
+# ── Manual trade entry ────────────────────────────────────────────────────────
+
+def add_manual_trade(trade, spreadsheet=None):
+    """
+    Write a single manually entered trade to Trade Log and update all summary sheets.
+    Returns dict: added, errors
+    """
+    if spreadsheet is None:
+        spreadsheet = get_sheets_client()
+
+    result = {"added": 0, "errors": []}
+
+    try:
+        trade_log = spreadsheet.worksheet("Trade Log")
+    except gspread.exceptions.WorksheetNotFound:
+        result["errors"].append("'Trade Log' worksheet not found.")
+        return result
+
+    _ensure_headers(trade_log)
+
+    # ── Duplicate check ───────────────────────────────────────────────────────
+    if trade.get("status") == "CLOSED":
+        existing_keys = _get_existing_keys(trade_log)
+        if _trade_key(trade) in existing_keys:
+            result["errors"].append(
+                f"Trade already exists: {trade.get('instrument')} on {trade.get('entry_date')}"
+            )
+            return result
+    elif trade.get("status") == "OPEN":
+        if _open_already_exists(trade_log, trade):
+            result["errors"].append(
+                f"Open position already exists for: {trade.get('instrument')}"
+            )
+            return result
+
+    # ── Build row ─────────────────────────────────────────────────────────────
+    next_sno   = _get_next_sno(trade_log)
+    long_short = trade.get("long_short", "")
+    if trade.get("status") == "OPEN" and "[OPEN]" not in long_short:
+        long_short = f"{long_short} [OPEN]"
+
+    row = [
+        next_sno,
+        trade.get("entry_date", ""),         # B  Entry Date
+        trade.get("segment", ""),            # C  Segment
+        trade.get("instrument", ""),         # D  Instrument
+        long_short,                          # E  Type
+        trade.get("lots", 1),               # F  Lots
+        trade.get("lot_size", 1),           # G  Lot Size
+        trade.get("entry_price", 0),        # H  Entry Price
+        trade.get("exit_date", ""),         # I  Exit Date
+        trade.get("exit_price", 0),         # J  Exit Price
+        trade.get("pl_points", 0),          # K  P/L (Points)
+        trade.get("actual_spot_points", ""),# L  Actual Spot Points
+        trade.get("pl_rupees", 0),          # M  P/L (₹)
+        "",                                 # N  Drawdown % (recalculated)
+        "",                                 # O  Cumulative P/L
+        "",                                 # P  Monthly P/L
+        "",                                 # Q  Cum Capital
+        trade.get("comments", ""),          # R  Comments
+        trade.get("total_charges", 0),      # S  Total Charges
+        trade.get("net_pl", 0),             # T  Net P/L
+        trade.get("duration_display", ""),  # U  Duration
+    ]
+
+    trade_log.append_rows([row], value_input_option="USER_ENTERED")
+    result["added"] = 1
+
+    # ── Keep OPEN rows at end, then recalculate everything ────────────────────
+    _move_open_rows_to_end(trade_log)
+    _recalculate_trade_log(trade_log)
+
+    cap = _read_starting_capital(trade_log)
+    _update_parameters_summary(trade_log, spreadsheet, cap)
+    _update_weekly_performance(trade_log, spreadsheet, cap)
+    _update_drawdown_analysis(trade_log, spreadsheet, cap)
+
+    return result
 
 
 # ── Header guard ──────────────────────────────────────────────────────────────
