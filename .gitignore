@@ -1,0 +1,22 @@
+# Secrets — never commit these
+.env
+google_creds.json
+*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Streamlit local cache
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploaded CSV files (temporary)
+*.csv
