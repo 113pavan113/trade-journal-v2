@@ -93,12 +93,14 @@ total_pl      = sum(t.get("pl_rupees", 0) for t in closed_trades)
 total_net_pl  = sum(t.get("net_pl", 0)    for t in closed_trades)
 total_charges = sum(t.get("total_charges", 0) for t in closed_trades)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Trades Found",   len(trades))
-col2.metric("Closed",         len(closed_trades))
-col3.metric("Open Positions", len(open_trades))
-pl_color = "normal" if total_net_pl == 0 else ("normal" if total_net_pl > 0 else "inverse")
-col4.metric("Net P/L (closed)", f"₹{total_net_pl:,.2f}",
+total_points = sum(t.get("pl_points", 0) for t in closed_trades)
+
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Trades Found",    len(trades))
+col2.metric("Closed",          len(closed_trades))
+col3.metric("Open Positions",  len(open_trades))
+col4.metric("Total Pts (closed)", f"{total_points:+.2f}")
+col5.metric("Net P/L (closed)", f"₹{total_net_pl:,.2f}",
             delta=f"charges ₹{total_charges:,.2f}", delta_color="inverse")
 
 st.divider()
@@ -120,6 +122,7 @@ for t in trades:
         "Lots":         t.get("lots", 1),
         "Entry ₹":      t.get("entry_price", 0),
         "Exit ₹":       t.get("exit_price", "") if t.get("status") == "CLOSED" else "—",
+        "P/L (Pts)":    t.get("pl_points", 0),
         "P/L ₹":        t.get("pl_rupees", 0),
         "Charges ₹":    t.get("total_charges", 0),
         "Net P/L ₹":    net_pl_val,
@@ -132,6 +135,7 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     column_config={
+        "P/L (Pts)": st.column_config.NumberColumn(format="%.2f"),
         "P/L ₹":     st.column_config.NumberColumn(format="₹%.2f"),
         "Net P/L ₹": st.column_config.NumberColumn(format="₹%.2f"),
         "Charges ₹": st.column_config.NumberColumn(format="₹%.2f"),
