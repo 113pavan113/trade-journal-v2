@@ -21,7 +21,7 @@ from charge_calculator import calculate_charges, parse_instrument_details
 
 # ── Lot sizes ─────────────────────────────────────────────────────────────────
 LOT_SIZES = {
-    "NIFTY": 75,       # revised lot size effective Nov 2024
+    "NIFTY": 65,       # revised lot size effective Apr 2025
     "BANKNIFTY": 15,
     "FINNIFTY": 40,
     "MIDCPNIFTY": 120,
@@ -77,7 +77,7 @@ def _read_csv(file_obj):
         text = file_obj.decode("utf-8", errors="replace")
     elif hasattr(file_obj, "read"):
         raw = file_obj.read()
-        text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else raw
+        text = raw.decode("utf-8-sig", errors="replace") if isinstance(raw, (bytes, bytearray)) else raw
     else:
         text = str(file_obj)
 
@@ -88,7 +88,7 @@ def _read_csv(file_obj):
 
     executions = []
     for row in reader:
-        symbol = (row.get("Symbol") or "").strip()
+        symbol = (row.get("Symbol") or row.get("Name") or "").strip()
         if not symbol:
             continue
 

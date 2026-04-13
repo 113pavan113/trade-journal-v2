@@ -456,6 +456,43 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
                           "Weekly P/L (₹)", "Cumulative P/L (₹)", "Weekly Return %"]])
     ws.update(f"A3:E{end_row}", rows, value_input_option="USER_ENTERED")
 
+    # Apply red/green color to Weekly P/L (col C=2) and Cumulative P/L (col D=3)
+    try:
+        sheet_id   = ws._properties["sheetId"]
+        sorted_weeks = sorted(weekly.keys())
+        color_requests = []
+        cum = 0.0
+        for i, monday in enumerate(sorted_weeks):
+            wpl  = weekly[monday]
+            cum += wpl
+            row_idx = 2 + i  # 0-based; row3 = index 2
+            for col_idx, val in [(2, wpl), (3, cum)]:
+                if val >= 0:
+                    bg = {"red": 0.714, "green": 0.843, "blue": 0.659}  # light green
+                else:
+                    bg = {"red": 0.957, "green": 0.698, "blue": 0.698}  # light red
+                color_requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": row_idx,
+                            "endRowIndex": row_idx + 1,
+                            "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": bg
+                            }
+                        },
+                        "fields": "userEnteredFormat.backgroundColor",
+                    }
+                })
+        if color_requests:
+            ws.spreadsheet.batch_update({"requests": color_requests})
+    except Exception:
+        pass
+
     # Clear stale rows below current data
     try:
         existing_rows = len(ws.get_all_values())
