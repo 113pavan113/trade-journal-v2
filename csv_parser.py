@@ -149,8 +149,8 @@ def _parse_int(s):
     if s is None:
         return 0
     try:
-        return int(str(s).replace(",", "").strip())
-    except ValueError:
+        return int(float(str(s).replace(",", "").strip()))
+    except (ValueError, TypeError):
         return 0
 
 

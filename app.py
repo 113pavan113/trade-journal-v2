@@ -84,19 +84,6 @@ with tab1:
 
         if trades is not None and len(trades) == 0:
             st.warning("No trades found. Make sure it is a valid Fyers tradebook CSV.")
-            # ── Debug: show raw CSV lines to diagnose format issues ───────────
-            with st.expander("🔍 Debug info"):
-                try:
-                    uploaded_file.seek(0)
-                    raw = uploaded_file.read()
-                    text = raw.decode("utf-8-sig", errors="replace")
-                    lines = text.splitlines()
-                    st.write(f"**Total lines:** {len(lines)}")
-                    st.write("**First 12 lines:**")
-                    for i, l in enumerate(lines[:12]):
-                        st.code(f"[{i}] {l}")
-                except Exception as ex:
-                    st.write(f"Debug error: {ex}")
             trades = None
 
         if trades:
