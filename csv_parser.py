@@ -82,8 +82,16 @@ def _read_csv(file_obj):
         text = str(file_obj)
 
     lines  = text.splitlines()
-    # Skip the 7-line preamble (6 metadata + 1 blank)
-    data_lines = lines[7:]
+    # Find the header row dynamically (look for "Name" or "Symbol" column)
+    header_idx = None
+    for i, line in enumerate(lines):
+        first_col = line.split(",")[0].strip().strip('"').lower()
+        if first_col in ("name", "symbol"):
+            header_idx = i
+            break
+    if header_idx is None:
+        return []
+    data_lines = lines[header_idx:]
     reader     = csv.DictReader(data_lines)
 
     executions = []
