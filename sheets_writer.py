@@ -311,49 +311,44 @@ def _recalculate_trade_log(trade_log):
         trade_log.batch_update(batch, value_input_option="USER_ENTERED")
 
     # ── Color column Q: green at ATH (drawdown=0), light red in drawdown ──────
-    try:
-        sheet_id   = trade_log._properties["sheetId"]
-        color_reqs = []
-        cum_pl2    = 0.0
-        peak2      = cap
+    sheet_id   = trade_log.id
+    color_reqs = []
+    cum_pl2    = 0.0
+    peak2      = cap
 
-        for row_idx, row in enumerate(all_data):
-            if row_idx < 3 or not row or not row[0]:
-                continue
-            if "[OPEN]" in (row[4] if len(row) > 4 else ""):
-                continue
+    for row_idx, row in enumerate(all_data):
+        if row_idx < 3 or not row or not row[0]:
+            continue
+        if "[OPEN]" in (row[4] if len(row) > 4 else ""):
+            continue
 
-            pl       = _safe_float(row[12]) if len(row) > 12 else 0.0
-            cum_pl2 += pl
-            cum_cap2 = cap + cum_pl2
-            if cum_cap2 > peak2:
-                peak2 = cum_cap2
+        pl       = _safe_float(row[12]) if len(row) > 12 else 0.0
+        cum_pl2 += pl
+        cum_cap2 = cap + cum_pl2
+        if cum_cap2 > peak2:
+            peak2 = cum_cap2
 
-            at_ath = (cum_cap2 >= peak2)
-            bg = ({"red": 0.714, "green": 0.843, "blue": 0.659}   # light green
-                  if at_ath else
-                  {"red": 0.957, "green": 0.698, "blue": 0.698})   # light red
+        at_ath     = (cum_cap2 >= peak2)
+        bg         = ({"red": 0.714, "green": 0.843, "blue": 0.659}
+                      if at_ath else
+                      {"red": 0.957, "green": 0.698, "blue": 0.698})
+        actual_row = row_idx + 1
+        color_reqs.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId":          sheet_id,
+                    "startRowIndex":    actual_row - 1,
+                    "endRowIndex":      actual_row,
+                    "startColumnIndex": 16,   # column Q
+                    "endColumnIndex":   17,
+                },
+                "cell": {"userEnteredFormat": {"backgroundColor": bg}},
+                "fields": "userEnteredFormat.backgroundColor",
+            }
+        })
 
-            col_idx    = 16   # column Q (0-based)
-            actual_row = row_idx + 1
-            color_reqs.append({
-                "repeatCell": {
-                    "range": {
-                        "sheetId":          sheet_id,
-                        "startRowIndex":    actual_row - 1,
-                        "endRowIndex":      actual_row,
-                        "startColumnIndex": col_idx,
-                        "endColumnIndex":   col_idx + 1,
-                    },
-                    "cell": {"userEnteredFormat": {"backgroundColor": bg}},
-                    "fields": "userEnteredFormat.backgroundColor",
-                }
-            })
-
-        if color_reqs:
-            trade_log.spreadsheet.batch_update({"requests": color_reqs})
-    except Exception:
-        pass
+    if color_reqs:
+        trade_log.spreadsheet.batch_update({"requests": color_reqs})
 
 
 # ── Sheet 2 — Parameters Summary ─────────────────────────────────────────────
