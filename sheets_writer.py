@@ -290,11 +290,21 @@ def _recalculate_trade_log(trade_log):
         if month_key:
             month_pls[month_key] += pl
 
+        existing_comment = row[17] if len(row) > 17 else ""
+        ath_label = "New All Time High" if drawdown == 0.0 else ""
+        if existing_comment.strip() == "New All Time High":
+            comment_val = ath_label   # clear it if no longer ATH
+        elif not existing_comment.strip():
+            comment_val = ath_label   # empty cell — write label or leave blank
+        else:
+            comment_val = existing_comment   # preserve manual comments
+
         batch.extend([
             {"range": f"N{actual_row}", "values": [[f"{round(drawdown, 2)}%"]]},
             {"range": f"O{actual_row}", "values": [[round(cum_pl, 2)]]},
             {"range": f"P{actual_row}", "values": [[round(month_pls.get(month_key, 0), 2)]]},
             {"range": f"Q{actual_row}", "values": [[round(cum_cap, 2)]]},
+            {"range": f"R{actual_row}", "values": [[comment_val]]},
         ])
 
     if batch:
