@@ -124,7 +124,7 @@ def sync_to_sheets(trades, spreadsheet=None):
     if result["added"] or result["open_updated"]:
         _move_open_rows_to_end(trade_log)
 
-    _recalculate_trade_log(trade_log)
+    _recalculate_trade_log(trade_log, spreadsheet)
 
     # ── 4. Update all summary sheets ──────────────────────────────────────────
     cap = _read_starting_capital(trade_log)
@@ -252,7 +252,7 @@ def _update_open_rows(trade_log, trades):
 
 # ── Trade Log derived columns (N, O, P, Q) ────────────────────────────────────
 
-def _recalculate_trade_log(trade_log):
+def _recalculate_trade_log(trade_log, spreadsheet=None):
     """Recalculate Drawdown %, Cumulative P/L, Monthly P/L, Cum Capital for all rows."""
     try:
         all_data = trade_log.get_all_values()
@@ -347,8 +347,8 @@ def _recalculate_trade_log(trade_log):
             }
         })
 
-    if color_reqs:
-        trade_log.spreadsheet.batch_update({"requests": color_reqs})
+    if color_reqs and spreadsheet:
+        spreadsheet.batch_update({"requests": color_reqs})
 
 
 # ── Sheet 2 — Parameters Summary ─────────────────────────────────────────────
@@ -716,7 +716,7 @@ def add_manual_trade(trade, spreadsheet=None):
 
     # ── Keep OPEN rows at end, then recalculate everything ────────────────────
     _move_open_rows_to_end(trade_log)
-    _recalculate_trade_log(trade_log)
+    _recalculate_trade_log(trade_log, spreadsheet)
 
     cap = _read_starting_capital(trade_log)
     _update_parameters_summary(trade_log, spreadsheet, cap)
