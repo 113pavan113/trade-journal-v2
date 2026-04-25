@@ -430,7 +430,7 @@ def _update_parameters_summary(trade_log, spreadsheet, starting_capital):
 
     updates = [
         ("C4",  f"₹ {starting_capital:,.0f}"),
-        ("C5",  _fmt_inr(total_pl)),
+        ("C5",  total_days),
         ("C6",  _fmt_inr(total_pl)),
         ("C7",  f"{cum_pct:.2f}%"),
         ("C8",  win_days),
