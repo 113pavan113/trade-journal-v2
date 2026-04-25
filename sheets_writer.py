@@ -430,7 +430,7 @@ def _update_parameters_summary(trade_log, spreadsheet, starting_capital):
 
     updates = [
         ("C4",  f"₹ {starting_capital:,.0f}"),
-        ("C5",  total_days),
+        ("C5",  _fmt_inr(total_pl)),
         ("C6",  _fmt_inr(total_pl)),
         ("C7",  f"{cum_pct:.2f}%"),
         ("C8",  win_days),
@@ -449,6 +449,7 @@ def _update_parameters_summary(trade_log, spreadsheet, starting_capital):
         ("C21", round(exp_rs, 2)),
         ("C22", round(total_charges, 0)),
         ("C23", round(total_points, 2)),
+        ("C24", _fmt_inr(total_pl - total_charges)),
     ]
 
     batch = [{"range": c, "values": [[v]]} for c, v in updates]
@@ -508,7 +509,7 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
 
     # Apply red/green color to Weekly P/L (col C=2) and Cumulative P/L (col D=3)
     try:
-        sheet_id   = ws._properties["sheetId"]
+        sheet_id   = ws.id
         sorted_weeks = sorted(weekly.keys())
         color_requests = []
         cum = 0.0
