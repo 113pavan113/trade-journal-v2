@@ -130,6 +130,7 @@ def sync_to_sheets(trades, spreadsheet=None):
     cap = _read_starting_capital(trade_log)
     _update_parameters_summary(trade_log, spreadsheet, cap)
     _update_weekly_performance(trade_log, spreadsheet, cap)
+    _update_monthly_performance(trade_log, spreadsheet, cap)
     _update_drawdown_analysis(trade_log, spreadsheet, cap)
 
     return result
@@ -471,7 +472,7 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
             continue
         if "[OPEN]" in (row[4] if len(row) > 4 else ""):
             continue
-        pl = _safe_float(row[12])
+        pl = _safe_float(row[19]) if len(row) > 19 else _safe_float(row[12])
         try:
             dt     = datetime.strptime(row[1], "%d/%m/%Y")
             monday = dt - timedelta(days=dt.weekday())
@@ -550,6 +551,129 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
         if existing_rows > end_row:
             clear_range = f"A{end_row+1}:E{existing_rows}"
             ws.batch_clear([clear_range])
+    except Exception:
+        pass
+
+
+def _update_monthly_performance(trade_log, spreadsheet, starting_capital):
+    try:
+        ws       = spreadsheet.worksheet("Monthly & Weekly P&L Report")
+        all_data = trade_log.get_all_values()
+    except Exception:
+        return
+
+    monthly = defaultdict(float)
+    for row in all_data[3:]:
+        if not row or not row[0]:
+            continue
+        if "[OPEN]" in (row[4] if len(row) > 4 else ""):
+            continue
+        exit_date_str = row[8].strip() if len(row) > 8 else ""
+        net_pl_str    = row[19].strip() if len(row) > 19 else ""
+        if not exit_date_str or not net_pl_str:
+            continue
+        try:
+            exit_dt    = datetime.strptime(exit_date_str, "%d/%m/%Y")
+            month_key  = exit_dt.strftime("%b %Y")
+            monthly[month_key] += _safe_float(net_pl_str)
+        except Exception:
+            pass
+
+    if not monthly:
+        return
+
+    sorted_months = sorted(monthly.keys(), key=lambda m: datetime.strptime(m, "%b %Y"))
+
+    def _fmt(v):
+        return f"{'₹' if v >= 0 else '-₹'}{abs(v):,.0f}"
+
+    rows    = []
+    cum_pl  = 0.0
+    for m in sorted_months:
+        mpl    = monthly[m]
+        cum_pl = round(cum_pl + mpl, 2)
+        ret    = mpl / starting_capital * 100
+        rows.append([m, _fmt(mpl), _fmt(cum_pl), f"{ret:.2f}%", mpl])
+
+    end_row = 2 + len(rows)
+    ws.update(range_name="H1:K1", values=[["MONTHLY PERFORMANCE", "", "", ""]])
+    ws.update(range_name="H2:K2", values=[["Month", "Monthly P/L (₹)", "Cumulative P/L (₹)", "Monthly Return %"]])
+    ws.update(range_name=f"H3:K{end_row}", values=[[r[0], r[1], r[2], r[3]] for r in rows],
+              value_input_option="USER_ENTERED")
+
+    try:
+        sheet_id = ws.id
+        dark_navy  = {"red": 0.188, "green": 0.231, "blue": 0.310}
+        dark_slate = {"red": 0.267, "green": 0.329, "blue": 0.412}
+        white      = {"red": 1.0,   "green": 1.0,   "blue": 1.0}
+        black      = {"red": 0.0,   "green": 0.0,   "blue": 0.0}
+        green_bg   = {"red": 0.714, "green": 0.843, "blue": 0.659}
+        red_bg     = {"red": 0.957, "green": 0.698, "blue": 0.698}
+        white_bg   = {"red": 1.0,   "green": 1.0,   "blue": 1.0}
+
+        fmt_reqs = [
+            {"mergeCells": {
+                "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 7, "endColumnIndex": 11},
+                "mergeType": "MERGE_ALL"
+            }},
+            {"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 7, "endColumnIndex": 11},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": dark_navy,
+                    "textFormat": {"foregroundColor": white, "bold": True, "fontSize": 12},
+                    "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)"
+            }},
+            {"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": 2,
+                          "startColumnIndex": 7, "endColumnIndex": 11},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": dark_slate,
+                    "textFormat": {"foregroundColor": white, "bold": True, "fontSize": 10},
+                    "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)"
+            }},
+        ]
+
+        for idx, row_data in enumerate(rows):
+            ri  = 2 + idx
+            bg  = green_bg if row_data[4] >= 0 else red_bg
+            fmt_reqs.append({"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": ri, "endRowIndex": ri + 1,
+                          "startColumnIndex": 7, "endColumnIndex": 11},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": bg,
+                    "textFormat": {"foregroundColor": black, "bold": False, "fontSize": 10},
+                    "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)"
+            }})
+            # Month name col (H) — white bg, left-aligned
+            fmt_reqs.append({"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": ri, "endRowIndex": ri + 1,
+                          "startColumnIndex": 7, "endColumnIndex": 8},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": white_bg,
+                    "textFormat": {"foregroundColor": black, "bold": False, "fontSize": 10},
+                    "horizontalAlignment": "LEFT", "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)"
+            }})
+
+        ws.spreadsheet.batch_update({"requests": fmt_reqs})
+    except Exception:
+        pass
+
+    # Clear stale monthly rows below current data
+    try:
+        existing = ws.get_all_values()
+        max_h_row = max((i for i, r in enumerate(existing) if len(r) > 7 and r[7]), default=end_row - 1)
+        if max_h_row + 1 > end_row:
+            ws.batch_clear([f"H{end_row+1}:K{max_h_row+1}"])
     except Exception:
         pass
 
@@ -722,6 +846,7 @@ def add_manual_trade(trade, spreadsheet=None):
     cap = _read_starting_capital(trade_log)
     _update_parameters_summary(trade_log, spreadsheet, cap)
     _update_weekly_performance(trade_log, spreadsheet, cap)
+    _update_monthly_performance(trade_log, spreadsheet, cap)
     _update_drawdown_analysis(trade_log, spreadsheet, cap)
 
     return result
