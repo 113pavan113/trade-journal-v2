@@ -11,8 +11,12 @@ import pandas as pd
 from datetime import datetime, date
 
 from csv_parser    import parse_fyers_csv, _fmt_duration, LOT_SIZES
-from sheets_writer import (get_sheets_client, sync_to_sheets, add_manual_trade,
-                            get_processed_order_ids)
+from sheets_writer import get_sheets_client, sync_to_sheets, add_manual_trade
+try:
+    from sheets_writer import get_processed_order_ids
+except ImportError:
+    def get_processed_order_ids(_ss):
+        return set()
 from charge_calculator import calculate_charges
 
 # ── Page config ───────────────────────────────────────────────────────────────
