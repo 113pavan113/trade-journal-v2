@@ -34,22 +34,32 @@ _NIFTY_OLD_LOT = 50   # pre-Nov-2024
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def parse_fyers_csv(file_obj):
+def parse_fyers_csv(file_obj, skip_order_ids=None):
     """
     Parse a Fyers tradebook CSV file.
 
     Args:
-        file_obj: a file-like object (open file or BytesIO / StringIO).
-                  Streamlit uploads give BytesIO; local files give file handles.
+        file_obj:        a file-like object (BytesIO / StringIO / open file).
+        skip_order_ids:  set of OMS order ID strings already processed — those
+                         executions are filtered out before grouping, preventing
+                         duplicate trades when overlapping CSVs are uploaded.
 
     Returns:
-        list[dict] — trade dicts sorted by entry_datetime, ready for sheets_writer.
+        (trades, new_order_ids)
+        trades         — list[dict] sorted by entry_datetime, ready for sheets_writer.
+        new_order_ids  — set[str] of OMS order IDs that were actually parsed this
+                         time (i.e. not in skip_order_ids). Save these to Config
+                         after a successful sync so future uploads skip them.
     """
     executions = _read_csv(file_obj)
     if not executions:
-        return []
+        return [], set()
 
-    legs       = _aggregate_by_symbol(executions)
+    skip = set(skip_order_ids) if skip_order_ids else set()
+    filtered   = [e for e in executions if e.get("order_id") not in skip]
+    new_ids    = {e["order_id"] for e in filtered if e.get("order_id")}
+
+    legs       = _aggregate_by_symbol(filtered)
     groups     = _group_into_spreads(legs)
     trades     = []
 
@@ -59,7 +69,7 @@ def parse_fyers_csv(file_obj):
             trades.append(trade)
 
     trades.sort(key=lambda t: t.get("entry_datetime", datetime.min))
-    return trades
+    return trades, new_ids
 
 
 # ── Step 1 — Read raw CSV rows ────────────────────────────────────────────────
@@ -104,10 +114,11 @@ def _read_csv(file_obj):
         dt_raw = (row.get("Date & time") or "").strip().strip('"')
         dt     = _parse_dt(dt_raw)
 
-        side   = (row.get("Side") or "").strip().upper()          # BUY / SELL
-        qty    = _parse_int(row.get("Qty"))
-        price  = _parse_float(row.get("Traded price"))
-        value  = _parse_float(row.get("Total value"))
+        side      = (row.get("Side") or "").strip().upper()       # BUY / SELL
+        qty       = _parse_int(row.get("Qty"))
+        price     = _parse_float(row.get("Traded price"))
+        value     = _parse_float(row.get("Total value"))
+        order_id  = _clean_order_id(row.get("OMS order ID") or row.get("OMS Order ID") or "")
 
         if not symbol or qty == 0 or price == 0:
             continue
@@ -124,9 +135,15 @@ def _read_csv(file_obj):
             "qty":      qty,
             "price":    price,
             "value":    value,
+            "order_id": order_id,
         })
 
     return executions
+
+
+def _clean_order_id(s):
+    """Strip Excel formula encoding: =\"value\" → value"""
+    return str(s).strip().strip('"').lstrip('=').strip('"').strip()
 
 
 def _parse_dt(s):

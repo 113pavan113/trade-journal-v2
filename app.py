@@ -11,7 +11,8 @@ import pandas as pd
 from datetime import datetime, date
 
 from csv_parser    import parse_fyers_csv, _fmt_duration, LOT_SIZES
-from sheets_writer import get_sheets_client, sync_to_sheets, add_manual_trade
+from sheets_writer import (get_sheets_client, sync_to_sheets, add_manual_trade,
+                            get_processed_order_ids)
 from charge_calculator import calculate_charges
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -75,10 +76,13 @@ with tab1:
 
     else:
         # ── Parse ─────────────────────────────────────────────────────────────
-        trades = None
+        trades     = None
+        _order_ids = set()
         with st.spinner("Parsing CSV..."):
             try:
-                trades = parse_fyers_csv(uploaded_file)
+                ss_pre     = get_sheets_client()
+                skip_ids   = get_processed_order_ids(ss_pre)
+                trades, _order_ids = parse_fyers_csv(uploaded_file, skip_order_ids=skip_ids)
             except Exception as e:
                 st.error(f"Failed to parse CSV: {e}")
 
@@ -178,7 +182,7 @@ with tab1:
                 with st.spinner("Syncing to Google Sheets..."):
                     try:
                         ss     = get_sheets_client()
-                        result = sync_to_sheets(trades, ss)
+                        result = sync_to_sheets(trades, ss, new_order_ids=_order_ids)
                         if result.get("errors"):
                             for err in result["errors"]:
                                 st.error(err)

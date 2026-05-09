@@ -50,9 +50,10 @@ def get_sheets_client():
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def sync_to_sheets(trades, spreadsheet=None):
+def sync_to_sheets(trades, spreadsheet=None, new_order_ids=None):
     """
     Sync trade list (from csv_parser) to all 4 sheets.
+    new_order_ids: set of OMS order IDs parsed this run — saved to Config on success.
     Returns dict: added, skipped, open_updated, errors
     """
     if spreadsheet is None:
@@ -132,6 +133,10 @@ def sync_to_sheets(trades, spreadsheet=None):
     _update_weekly_performance(trade_log, spreadsheet, cap)
     _update_monthly_performance(trade_log, spreadsheet, cap)
     _update_drawdown_analysis(trade_log, spreadsheet, cap)
+
+    # Save processed order IDs so future uploads with overlapping dates skip them
+    if new_order_ids:
+        save_processed_order_ids(spreadsheet, new_order_ids)
 
     return result
 
@@ -881,3 +886,36 @@ def _safe_float(s):
                      .replace("(", "-").replace(")", "").strip())
     except (ValueError, TypeError):
         return 0.0
+
+
+# ── OMS order-ID tracking (prevents duplicate syncs from overlapping CSVs) ────
+
+def get_processed_order_ids(spreadsheet):
+    """Return the set of OMS order IDs already synced, from Config sheet."""
+    try:
+        cfg  = spreadsheet.worksheet("Config")
+        rows = cfg.get_all_values()
+        for row in rows:
+            if row and row[0] == "processed_order_ids" and len(row) > 1 and row[1]:
+                return set(row[1].split(",")) - {""}
+    except Exception:
+        pass
+    return set()
+
+
+def save_processed_order_ids(spreadsheet, new_ids):
+    """Merge new_ids into the existing processed list in Config sheet."""
+    if not new_ids:
+        return
+    try:
+        cfg  = spreadsheet.worksheet("Config")
+        rows = cfg.get_all_values()
+        for i, row in enumerate(rows, 1):
+            if row and row[0] == "processed_order_ids":
+                existing = set(row[1].split(",")) - {""}
+                merged   = existing | set(new_ids)
+                cfg.update(range_name=f"B{i}", values=[[",".join(sorted(merged))]])
+                return
+        cfg.append_row(["processed_order_ids", ",".join(sorted(new_ids))])
+    except Exception:
+        pass
