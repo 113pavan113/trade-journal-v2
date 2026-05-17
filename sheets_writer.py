@@ -7,6 +7,7 @@ Sheet 1 — Trade Log        (individual trade rows, columns A-U)
 Sheet 2 — Parameters Summary (21 performance metrics)
 Sheet 3 — Monthly & Weekly P&L Report (weekly performance table)
 Sheet 4 — Drawdown Analysis (per-trade equity curve)
+Sheet 5 — Cumulative Realized P&L (date-wise realized P&L curve)
 """
 
 import os
@@ -111,7 +112,7 @@ def sync_to_sheets(trades, spreadsheet=None, new_order_ids=None):
             "",                                 # O  Cumulative P/L
             "",                                 # P  Monthly Profit/Loss
             "",                                 # Q  Cum Capital (No Charges)
-            "",                                 # R  Comments
+            _format_comment(trade),             # R  Comments
             trade.get("total_charges", 0),      # S  Total Charges
             trade.get("net_pl", 0),             # T  Net P/L
             trade.get("duration_display", ""),  # U  Duration
@@ -133,6 +134,7 @@ def sync_to_sheets(trades, spreadsheet=None, new_order_ids=None):
     _update_weekly_performance(trade_log, spreadsheet, cap)
     _update_monthly_performance(trade_log, spreadsheet, cap)
     _update_drawdown_analysis(trade_log, spreadsheet, cap)
+    _update_cumulative_realized_chart(trade_log, spreadsheet, cap)
 
     # Save processed order IDs so future uploads with overlapping dates skip them
     if new_order_ids:
@@ -158,6 +160,8 @@ def _normalize_instrument(s):
 
 
 def _trade_key(trade):
+    if trade.get("source_id"):
+        return str(trade["source_id"])
     instr = _normalize_instrument(trade.get("instrument", ""))
     return f"{trade.get('entry_date', '')}_{instr}"
 
@@ -170,6 +174,10 @@ def _get_existing_keys(sheet):
         keys = set()
         for row in data[3:]:
             if len(row) >= 4 and row[0]:
+                comment = row[17] if len(row) > 17 else ""
+                source_match = re.search(r"\bsource_id=(.+)$", comment)
+                if source_match:
+                    keys.add(source_match.group(1).strip())
                 keys.add(f"{row[1]}_{_normalize_instrument(row[3])}")
         return keys
     except Exception:
@@ -202,6 +210,14 @@ def _open_already_exists(sheet, trade):
 
 def _instruments_match(a, b):
     return _normalize_instrument(a) == _normalize_instrument(b)
+
+
+def _format_comment(trade):
+    comment = str(trade.get("comments", "") or "").strip()
+    source_id = str(trade.get("source_id", "") or "").strip()
+    if source_id and "source_id=" not in comment:
+        return f"{comment} | source_id={source_id}" if comment else f"source_id={source_id}"
+    return comment
 
 
 # ── Close existing OPEN rows ──────────────────────────────────────────────────
@@ -479,7 +495,10 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
             continue
         pl = _safe_float(row[19]) if len(row) > 19 else _safe_float(row[12])
         try:
-            dt     = datetime.strptime(row[1], "%d/%m/%Y")
+            # Weekly P&L should follow when the P&L is realized. Use exit date
+            # for closed trades and label the reporting week as Mon-Fri.
+            date_str = (row[8].strip() if len(row) > 8 and row[8].strip() else row[1])
+            dt     = datetime.strptime(date_str, "%d/%m/%Y")
             monday = dt - timedelta(days=dt.weekday())
             weekly[monday] += pl
         except Exception:
@@ -491,7 +510,7 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
     rows    = []
     cum_pl  = 0.0
     for monday in sorted(weekly.keys()):
-        sunday  = monday + timedelta(days=6)
+        friday  = monday + timedelta(days=4)
         wpl     = weekly[monday]
         cum_pl += wpl
         ret_pct = wpl / starting_capital * 100
@@ -501,7 +520,7 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
 
         rows.append([
             monday.strftime("%d-%b-%y"),
-            sunday.strftime("%d-%b-%y"),
+            friday.strftime("%d-%b-%y"),
             _w(wpl),
             _w(cum_pl),
             f"{ret_pct:.2f}%",
@@ -509,7 +528,7 @@ def _update_weekly_performance(trade_log, spreadsheet, starting_capital):
 
     end_row = 2 + len(rows)
     ws.update("A1:E1", [["WEEKLY PERFORMANCE", "", "", "", ""]])
-    ws.update("A2:E2", [["Week Start (Mon)", "Week End (Sun)",
+    ws.update("A2:E2", [["Week Start (Mon)", "Week End (Fri)",
                           "Weekly P/L (₹)", "Cumulative P/L (₹)", "Weekly Return %"]])
     ws.update(f"A3:E{end_row}", rows, value_input_option="USER_ENTERED")
 
@@ -745,6 +764,171 @@ def _update_drawdown_analysis(trade_log, spreadsheet, starting_capital):
         pass
 
 
+# ── Sheet 5 — Cumulative Realized P&L Chart ──────────────────────────────────
+
+def _update_cumulative_realized_chart(trade_log, spreadsheet, starting_capital):
+    """
+    Build a date-wise realized P&L curve from closed trades.
+    Uses exit date when available, because the P&L is realized on exit.
+    """
+    try:
+        all_data = trade_log.get_all_values()
+    except Exception:
+        return
+
+    daily = defaultdict(float)
+    for row in all_data[3:]:
+        if not row or not row[0]:
+            continue
+        if "[OPEN]" in (row[4] if len(row) > 4 else ""):
+            continue
+        date_str = row[8].strip() if len(row) > 8 and row[8].strip() else ""
+        if not date_str:
+            continue
+        try:
+            dt = datetime.strptime(date_str, "%d/%m/%Y")
+        except Exception:
+            continue
+        daily[dt] += _safe_float(row[19]) if len(row) > 19 else _safe_float(row[12])
+
+    try:
+        ws = spreadsheet.worksheet("Cumulative Realized P&L")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet("Cumulative Realized P&L", rows=200, cols=8)
+
+    try:
+        ws.clear()
+    except Exception:
+        pass
+
+    _delete_sheet_charts(spreadsheet, ws.id)
+
+    ws.update("A1:D1", [["Date", "Daily Realized P&L", "Cumulative Realized P&L", "Capital After Realized P&L"]])
+
+    if not daily:
+        return
+
+    rows = []
+    cum = 0.0
+    for dt in sorted(daily.keys()):
+        day_pl = round(daily[dt], 2)
+        cum = round(cum + day_pl, 2)
+        rows.append([
+            dt.strftime("%d/%m/%Y"),
+            day_pl,
+            cum,
+            round(starting_capital + cum, 2),
+        ])
+
+    end_row = 1 + len(rows)
+    ws.update(f"A2:D{end_row}", rows, value_input_option="USER_ENTERED")
+
+    try:
+        sheet_id = ws.id
+        dark_navy = {"red": 0.188, "green": 0.231, "blue": 0.310}
+        white = {"red": 1.0, "green": 1.0, "blue": 1.0}
+        grid = {"red": 0.851, "green": 0.867, "blue": 0.890}
+
+        requests = [
+            {"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 4},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": dark_navy,
+                    "textFormat": {"foregroundColor": white, "bold": True},
+                    "horizontalAlignment": "CENTER",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+            }},
+            {"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": end_row,
+                          "startColumnIndex": 1, "endColumnIndex": 4},
+                "cell": {"userEnteredFormat": {
+                    "numberFormat": {"type": "CURRENCY", "pattern": "₹#,##0.00;[Red]-₹#,##0.00"},
+                }},
+                "fields": "userEnteredFormat.numberFormat",
+            }},
+            {"updateBorders": {
+                "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": end_row,
+                          "startColumnIndex": 0, "endColumnIndex": 4},
+                "top": {"style": "SOLID", "width": 1, "color": grid},
+                "bottom": {"style": "SOLID", "width": 1, "color": grid},
+                "left": {"style": "SOLID", "width": 1, "color": grid},
+                "right": {"style": "SOLID", "width": 1, "color": grid},
+                "innerHorizontal": {"style": "SOLID", "width": 1, "color": grid},
+                "innerVertical": {"style": "SOLID", "width": 1, "color": grid},
+            }},
+            {"autoResizeDimensions": {
+                "dimensions": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 4}
+            }},
+            {"addChart": {
+                "chart": {
+                    "spec": {
+                        "title": "Cumulative Realized P&L",
+                        "basicChart": {
+                            "chartType": "LINE",
+                            "legendPosition": "NO_LEGEND",
+                            "headerCount": 1,
+                            "axis": [
+                                {"position": "BOTTOM_AXIS", "title": "Date"},
+                                {"position": "LEFT_AXIS", "title": "Cumulative Realized P&L"},
+                            ],
+                            "domains": [{
+                                "domain": {"sourceRange": {"sources": [{
+                                    "sheetId": sheet_id,
+                                    "startRowIndex": 0,
+                                    "endRowIndex": end_row,
+                                    "startColumnIndex": 0,
+                                    "endColumnIndex": 1,
+                                }]}}
+                            }],
+                            "series": [{
+                                "series": {"sourceRange": {"sources": [{
+                                    "sheetId": sheet_id,
+                                    "startRowIndex": 0,
+                                    "endRowIndex": end_row,
+                                    "startColumnIndex": 2,
+                                    "endColumnIndex": 3,
+                                }]}},
+                                "targetAxis": "LEFT_AXIS",
+                            }],
+                        },
+                    },
+                    "position": {
+                        "overlayPosition": {
+                            "anchorCell": {"sheetId": sheet_id, "rowIndex": 1, "columnIndex": 5},
+                            "offsetXPixels": 0,
+                            "offsetYPixels": 0,
+                            "widthPixels": 780,
+                            "heightPixels": 420,
+                        }
+                    },
+                }
+            }},
+        ]
+        spreadsheet.batch_update({"requests": requests})
+    except Exception:
+        pass
+
+
+def _delete_sheet_charts(spreadsheet, sheet_id):
+    try:
+        metadata = spreadsheet.fetch_sheet_metadata()
+        requests = []
+        for sheet in metadata.get("sheets", []):
+            props = sheet.get("properties", {})
+            if props.get("sheetId") != sheet_id:
+                continue
+            for chart in sheet.get("charts", []):
+                chart_id = chart.get("chartId")
+                if chart_id is not None:
+                    requests.append({"deleteEmbeddedObject": {"objectId": chart_id}})
+        if requests:
+            spreadsheet.batch_update({"requests": requests})
+    except Exception:
+        pass
+
+
 # ── OPEN rows to bottom ───────────────────────────────────────────────────────
 
 def _move_open_rows_to_end(trade_log):
@@ -853,6 +1037,7 @@ def add_manual_trade(trade, spreadsheet=None):
     _update_weekly_performance(trade_log, spreadsheet, cap)
     _update_monthly_performance(trade_log, spreadsheet, cap)
     _update_drawdown_analysis(trade_log, spreadsheet, cap)
+    _update_cumulative_realized_chart(trade_log, spreadsheet, cap)
 
     return result
 

@@ -11,6 +11,7 @@ import pandas as pd
 from datetime import datetime, date
 
 from csv_parser    import parse_fyers_csv, _fmt_duration, LOT_SIZES
+from realized_pnl_parser import looks_like_realized_pnl_csv, parse_realized_pnl_csv
 from sheets_writer import get_sheets_client, sync_to_sheets, add_manual_trade
 try:
     from sheets_writer import get_processed_order_ids
@@ -34,7 +35,7 @@ st.markdown("""
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("📊 Trade Journal V2")
-st.caption("Upload your Fyers tradebook CSV → journal updates automatically.")
+st.caption("Upload Fyers Realized P&L for closed trades, or Tradebook for open positions.")
 st.divider()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -51,8 +52,8 @@ with st.sidebar:
                 st.error(f"Connection failed: {e}")
     st.divider()
     st.caption("**How to use:**")
-    st.caption("1. Download tradebook from Fyers terminal")
-    st.caption("2. Upload CSV (daily or weekly)")
+    st.caption("1. Weekly closed trades: upload **Realized P&L CSV**")
+    st.caption("2. Current open trades: upload **Tradebook CSV**")
     st.caption("3. Review the preview")
     st.caption("4. Click **Sync to Sheets**")
     st.divider()
@@ -70,23 +71,29 @@ tab1, tab2 = st.tabs(["📂 CSV Upload & Sync", "✏️ Manual Entry"])
 with tab1:
 
     uploaded_file = st.file_uploader(
-        "📂 Drop your Fyers tradebook CSV here",
+        "📂 Drop your Fyers CSV here",
         type=["csv"],
-        help="Download from Fyers terminal → Reports → Trade Book → Export CSV",
+        help="Preferred: Realized P&L CSV for weekly closed trades. Use Tradebook CSV only for open-position tracking.",
     )
 
     if uploaded_file is None:
-        st.info("Upload a Fyers tradebook CSV to get started.")
+        st.info("Upload a Fyers Realized P&L CSV to sync closed trades. Upload Tradebook only when you need open-position tracking.")
 
     else:
         # ── Parse ─────────────────────────────────────────────────────────────
         trades     = None
         _order_ids = set()
+        csv_kind   = "Tradebook"
         with st.spinner("Parsing CSV..."):
             try:
-                ss_pre     = get_sheets_client()
-                skip_ids   = get_processed_order_ids(ss_pre)
-                trades, _order_ids = parse_fyers_csv(uploaded_file, skip_order_ids=skip_ids)
+                payload = uploaded_file.getvalue()
+                if looks_like_realized_pnl_csv(payload):
+                    csv_kind = "Realized P&L"
+                    trades, _order_ids = parse_realized_pnl_csv(payload)
+                else:
+                    ss_pre     = get_sheets_client()
+                    skip_ids   = get_processed_order_ids(ss_pre)
+                    trades, _order_ids = parse_fyers_csv(payload, skip_order_ids=skip_ids)
             except Exception as e:
                 st.error(f"Failed to parse CSV: {e}")
 
@@ -95,6 +102,7 @@ with tab1:
             trades = None
 
         if trades:
+            st.caption(f"Detected CSV type: **{csv_kind}**")
             # ── Summary metrics ───────────────────────────────────────────────
             closed_trades = [t for t in trades if t.get("status") == "CLOSED"]
             open_trades   = [t for t in trades if t.get("status") == "OPEN"]
